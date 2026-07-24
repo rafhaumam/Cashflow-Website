@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Cashflow — Pencatatan Keuangan</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#173432">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -530,7 +536,7 @@
     <button class="tab-btn" data-tab="budget"><span class="ic">🎯</span>Anggaran</button>
     <div class="fab" id="openAdd">+</div>
     <button class="tab-btn" data-tab="report"><span class="ic">📊</span>Laporan</button>
-    <button class="tab-btn" id="dummyTab"><span class="ic">⋯</span>Info</button>
+    <button class="tab-btn" id="accountTab"><span class="ic">👤</span>Akun</button>
   </nav>
 
   <!-- ADD/EDIT TRANSACTION SHEET -->
@@ -567,6 +573,33 @@
         <input type="text" inputmode="numeric" id="budgetAmountInput" placeholder="Rp 0">
       </div>
       <button class="save-btn" id="budgetSaveBtn">Simpan anggaran</button>
+    </div>
+  </div>
+
+  <!-- AUTH OVERLAY -->
+  <div class="overlay" id="authOverlay" style="align-items:center;">
+    <div class="sheet" style="border-radius:22px; max-width:340px;">
+      <h3 id="authTitle">Masuk ke Cashflow</h3>
+      <p style="font-size:12.5px; color:var(--ink-soft); margin-top:-8px; margin-bottom:16px;">Datamu disimpan online lewat Firebase, jadi bisa diakses dari HP mana pun selama login akun yang sama.</p>
+      <label class="field-label">Email</label>
+      <input type="email" id="authEmail" placeholder="kamu@email.com" style="width:100%; border:1px solid var(--paper-line); background:var(--paper-hi); border-radius:12px; padding:11px 12px; font-family:var(--font-body); font-size:13.5px; margin-bottom:14px; outline:none;">
+      <label class="field-label">Kata sandi</label>
+      <input type="password" id="authPassword" placeholder="minimal 6 karakter" style="width:100%; border:1px solid var(--paper-line); background:var(--paper-hi); border-radius:12px; padding:11px 12px; font-family:var(--font-body); font-size:13.5px; margin-bottom:18px; outline:none;">
+      <button class="save-btn" id="authSubmitBtn">Masuk</button>
+      <div id="authError" style="color:var(--stamp-red); font-size:12px; margin-top:10px; text-align:center; min-height:14px;"></div>
+      <div style="text-align:center; margin-top:14px; font-size:12.5px; color:var(--ink-soft);">
+        <span id="authToggleText">Belum punya akun?</span> <a href="#" id="authToggleLink" style="color:var(--ink); font-weight:600; text-decoration:none;">Daftar</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACCOUNT OVERLAY -->
+  <div class="overlay" id="accountOverlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h3>Akun</h3>
+      <p style="font-size:13px; color:var(--ink-soft); margin-bottom:20px;">Masuk sebagai <b id="accountEmail" style="color:var(--ink);">-</b></p>
+      <button class="del-btn" id="logoutBtn" style="border-color:var(--ink); color:var(--ink);">Keluar</button>
     </div>
   </div>
 
@@ -627,24 +660,108 @@
     setTimeout(()=>t.classList.remove('show'), 1800);
   }
 
-  // ---------- storage ----------
+  // ---------- Firebase config ----------
+  // GANTI nilai di bawah ini dengan config dari Firebase Console kamu:
+  // Project settings (ikon gerigi) -> General -> Your apps -> SDK setup and configuration
+  const firebaseConfig = {
+    apiKey: "AIzaSyCyqDDvLu5qPangHlulnQCURpzlQPdHJEM",
+    authDomain: "cashflow-rafhaumam.firebaseapp.com",
+    projectId: "cashflow-rafhaumam",
+    storageBucket: "cashflow-rafhaumam.firebasestorage.app",
+    messagingSenderId: "84687674807",
+    appId: "1:84687674807:web:70b83721245c0cc4109c32"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+  let currentUser = null;
+  let authMode = 'login';
+
+  function friendlyAuthError(e){
+    const code = e && e.code || '';
+    if(code.includes('wrong-password') || code.includes('invalid-credential')) return 'Email atau kata sandi salah';
+    if(code.includes('user-not-found')) return 'Akun belum terdaftar, coba Daftar dulu';
+    if(code.includes('email-already-in-use')) return 'Email sudah terdaftar, coba Masuk';
+    if(code.includes('weak-password')) return 'Kata sandi minimal 6 karakter';
+    if(code.includes('invalid-email')) return 'Format email tidak valid';
+    if(code.includes('network-request-failed')) return 'Koneksi internet bermasalah';
+    return 'Terjadi kesalahan, coba lagi';
+  }
+
+  $('#authToggleLink').addEventListener('click', (e)=>{
+    e.preventDefault();
+    authMode = authMode === 'login' ? 'register' : 'login';
+    $('#authTitle').textContent = authMode === 'login' ? 'Masuk ke Cashflow' : 'Daftar akun baru';
+    $('#authSubmitBtn').textContent = authMode === 'login' ? 'Masuk' : 'Daftar';
+    $('#authToggleText').textContent = authMode === 'login' ? 'Belum punya akun?' : 'Sudah punya akun?';
+    $('#authToggleLink').textContent = authMode === 'login' ? 'Daftar' : 'Masuk';
+    $('#authError').textContent = '';
+  });
+
+  $('#authSubmitBtn').addEventListener('click', async ()=>{
+    const email = $('#authEmail').value.trim();
+    const password = $('#authPassword').value;
+    $('#authError').textContent = '';
+    if(!email || !password){ $('#authError').textContent = 'Isi email dan kata sandi dulu'; return; }
+    $('#authSubmitBtn').textContent = 'Memproses...';
+    try{
+      if(authMode === 'login'){
+        await auth.signInWithEmailAndPassword(email, password);
+      }else{
+        await auth.createUserWithEmailAndPassword(email, password);
+      }
+    }catch(e){
+      $('#authError').textContent = friendlyAuthError(e);
+    }
+    $('#authSubmitBtn').textContent = authMode === 'login' ? 'Masuk' : 'Daftar';
+  });
+
+  $('#accountTab').addEventListener('click', ()=>{
+    $('#accountEmail').textContent = currentUser ? currentUser.email : '-';
+    $('#accountOverlay').classList.add('show');
+  });
+  $('#accountOverlay').addEventListener('click', (e)=>{ if(e.target.id==='accountOverlay') $('#accountOverlay').classList.remove('show'); });
+  $('#logoutBtn').addEventListener('click', async ()=>{
+    await auth.signOut();
+    $('#accountOverlay').classList.remove('show');
+  });
+
+  auth.onAuthStateChanged(async (user)=>{
+    currentUser = user;
+    if(user){
+      $('#authOverlay').classList.remove('show');
+      $('#authEmail').value = '';
+      $('#authPassword').value = '';
+      await loadData();
+    }else{
+      $('#authOverlay').classList.add('show');
+    }
+  });
+
+  // ---------- storage (Firestore: data online, synced across devices per akun) ----------
+  function userDoc(name){
+    return db.collection('users').doc(currentUser.uid).collection('cashflow').doc(name);
+  }
   async function loadData(){
+    if(!currentUser) return;
     try{
-      const r = await window.storage.get('transactions', false);
-      transactions = r ? JSON.parse(r.value) : [];
-    }catch(e){ transactions = []; }
+      const doc = await userDoc('transactions').get();
+      transactions = doc.exists ? (doc.data().items || []) : [];
+    }catch(e){ transactions = []; showToast('Gagal memuat data'); }
     try{
-      const r2 = await window.storage.get('budgets', false);
-      budgets = r2 ? JSON.parse(r2.value) : {};
+      const doc2 = await userDoc('budgets').get();
+      budgets = doc2.exists ? (doc2.data().items || {}) : {};
     }catch(e){ budgets = {}; }
     renderAll();
   }
   async function saveTransactions(){
-    try{ await window.storage.set('transactions', JSON.stringify(transactions), false); }
+    if(!currentUser) return;
+    try{ await userDoc('transactions').set({items: transactions}); }
     catch(e){ showToast('Gagal menyimpan data'); }
   }
   async function saveBudgets(){
-    try{ await window.storage.set('budgets', JSON.stringify(budgets), false); }
+    if(!currentUser) return;
+    try{ await userDoc('budgets').set({items: budgets}); }
     catch(e){ showToast('Gagal menyimpan anggaran'); }
   }
 
@@ -812,7 +929,7 @@
     });
   });
   $('#dummyTab').addEventListener('click', ()=>{
-    showToast('Data tersimpan otomatis ke akun Claude kamu ☁️');
+    showToast('Data tersimpan di browser HP ini saja 📱');
   });
 
   // ---------- add/edit sheet ----------
@@ -933,7 +1050,11 @@
     renderReport();
   });
 
-  loadData();
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', ()=>{
+      navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    });
+  }
 })();
 </script>
 </body>
